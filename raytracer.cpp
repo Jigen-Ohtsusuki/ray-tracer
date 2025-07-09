@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <thread>
 
 #define M_PI 3.14159265358979323846
 
@@ -51,9 +52,9 @@ Vec3 get_ray_dir(int x, int y, float fov_deg, float aspect, float yaw, float pit
     float px = (2 * ((x + 0.5f) / RENDER_WIDTH) - 1) * aspect * std::tan(fov_deg * 0.5f * M_PI / 180);
     float py = (1 - 2 * ((y + 0.5f) / RENDER_HEIGHT)) * std::tan(fov_deg * 0.5f * M_PI / 180);
 
-    Vec3 dir = {px, py, -1};  // initial direction (camera faces -Z)
+    Vec3 dir = {px, py, -1};
 
-    // Apply pitch (X-axis rotation)
+    // Pitch (X-axis rotation)
     float cp = std::cos(pitch), sp = std::sin(pitch);
     float cy = std::cos(yaw), sy = std::sin(yaw);
 
@@ -62,7 +63,7 @@ Vec3 get_ray_dir(int x, int y, float fov_deg, float aspect, float yaw, float pit
     dir.y = dy;
     dir.z = dz;
 
-    // Apply yaw (Y-axis rotation)
+    // Yaw (Y-axis rotation)
     float dx = dir.x * cy + dir.z * sy;
     dz = -dir.x * sy + dir.z * cy;
     dir.x = dx;
@@ -76,24 +77,40 @@ void render(SDL_Surface* surface, Vec3 cam_pos, float cam_yaw, float cam_pitch) 
     Uint32* pixels = (Uint32*)surface->pixels;
     float aspect = (float)RENDER_WIDTH / RENDER_HEIGHT;
 
-    for (int y = 0; y < RENDER_HEIGHT; y++) {
-        for (int x = 0; x < RENDER_WIDTH; x++) {
-            Vec3 dir = get_ray_dir(x, y, FOV, aspect, cam_yaw, cam_pitch);
-            SDL_Color color = {0, 0, 0, 255};
-            float min_t = 1e9;
+    int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4; // fallback
 
-            for (const auto& s : spheres) {
-                float t;
-                if (hit_sphere(cam_pos, dir, s, t) && t < min_t) {
-                    min_t = t;
-                    color = s.color;
+    std::vector<std::thread> threads;
+    int rows_per_thread = RENDER_HEIGHT / num_threads;
+
+    auto render_chunk = [&](int start_y, int end_y) {
+        for (int y = start_y; y < end_y; y++) {
+            for (int x = 0; x < RENDER_WIDTH; x++) {
+                Vec3 dir = get_ray_dir(x, y, FOV, aspect, cam_yaw, cam_pitch);
+                SDL_Color color = {0, 0, 0, 255};
+                float min_t = 1e9;
+
+                for (const auto& s : spheres) {
+                    float t;
+                    if (hit_sphere(cam_pos, dir, s, t) && t < min_t) {
+                        min_t = t;
+                        color = s.color;
+                    }
                 }
-            }
 
-            pixels[y * RENDER_WIDTH + x] =
-                SDL_MapRGB(surface->format, color.r, color.g, color.b);
+                pixels[y * RENDER_WIDTH + x] =
+                    SDL_MapRGB(surface->format, color.r, color.g, color.b);
+            }
         }
+    };
+
+    for (int i = 0; i < num_threads; ++i) {
+        int start_y = i * rows_per_thread;
+        int end_y = (i == num_threads - 1) ? RENDER_HEIGHT : (i + 1) * rows_per_thread;
+        threads.emplace_back(render_chunk, start_y, end_y);
     }
+
+    for (auto& t : threads) t.join();
 
     SDL_UnlockSurface(surface);
 }
