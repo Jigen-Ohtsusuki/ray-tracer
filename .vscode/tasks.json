@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Raytracer",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "raytracer.cpp",
+        "-o", "raytracer.exe",
+        "-std=c++17",
+        "-DSDL_MAIN_HANDLED",
+        "-IC:/msys64/ucrt64/include/SDL2",
+        "-LC:/msys64/ucrt64/lib",
+        "-lSDL2",
+        "-lmingw32",
+        "-mconsole"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    }
+  ]
+}
