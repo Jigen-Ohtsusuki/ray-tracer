@@ -1,382 +1,289 @@
 # Ray Tracer
 
-A high-performance real-time ray tracer implemented in C++ using SDL2 and multi-threading. This project demonstrates advanced ray tracing concepts including realistic lighting, sphere intersection, camera movement, and optimized rendering techniques with dramatically improved performance over the original Python implementation.
+A high-performance, GPU-accelerated real-time ray tracer implemented in C++ using SDL2, CUDA, and ImGui. This project significantly enhances the previous CPU-based ray tracer by leveraging CUDA for parallel rendering, adding triangle mesh support, OBJ file import, a dynamic scene editor, and an interactive GUI for scene manipulation. It demonstrates advanced ray tracing techniques with realistic lighting, shadows, and user-friendly controls.
 
 ## Features
 
-- **Advanced Lighting System**: Realistic Lambertian diffuse lighting with directional sun light
-- **Hemispherical Ambient Lighting**: Sky-facing surfaces receive more ambient light for natural-looking shadows
-- **Sky Gradient Background**: Beautiful gradient sky instead of solid black background
-- **Multi-threaded Ray Tracer**: Utilizes all CPU cores for maximum performance
-- **Real-time Rendering**: Interactive 3D rendering achieving 120-140 FPS with full lighting
-- **Full 6DOF Camera Controls**: Complete movement and rotation with mouse-look style controls
-- **Automatic Thread Detection**: Dynamically uses `std::thread::hardware_concurrency()` for optimal threading
-- **Pitch/Yaw Camera System**: Look up/down and turn left/right with arrow keys
-- **Multiple Objects**: Renders multiple colored spheres with realistic shading in 3D space
-- **Real-time FPS Counter**: Performance monitoring displayed in window title
-- **Perspective Camera**: Configurable field of view with proper aspect ratio handling
+- **GPU-Accelerated Rendering**: Utilizes CUDA for massively parallel ray tracing, achieving high FPS even at high resolutions.
+- **Triangle Mesh Support**: Renders complex geometry using triangles, supporting custom meshes and OBJ file imports.
+- **Interactive Scene Editor**: Add, edit, and manipulate 3D objects (cubes, spheres, custom meshes) via ImGui interface.
+- **OBJ File Import**: Load 3D models from OBJ files with automatic triangle generation.
+- **Realistic Lighting System**: Includes diffuse lighting, ambient occlusion, and hard shadows with sun-like light source.
+- **Checkerboard Floor**: Dynamic tiled floor with customizable colors and size for scene grounding.
+- **Sky Gradient with Sun Glow**: Enhanced sky rendering with a glowing sun effect based on light direction.
+- **Full 6DOF Camera Controls**: Mouse and keyboard controls for free camera movement and rotation.
+- **Dynamic Resolution Scaling**: Adjustable rendering resolution with preset options (320x240 to 1920x1080).
+- **ImGui Interface**: Intuitive GUI for controlling camera, light, floor, and object properties.
+- **Performance Monitoring**: Real-time FPS, frame time graphs, and triangle count display.
+- **Mesh Transformation**: Support for position, rotation, and scale adjustments for each mesh.
+- **Shadow Casting**: Hard shadows computed on the GPU for realistic lighting.
+- **Optimized Memory Management**: Efficient CUDA memory handling for large scenes.
 
 ## Demo
 
 <div align="center">
-  <img src="raytracer-demo.gif" alt="Ray Tracer Demo" width="640">
+  <img src="raytracer-demo.gif" alt="Ray Tracer Demo" width="800">
 </div>
 
-The scene contains three spheres with realistic lighting:
-- Red sphere at position (-1.5, 0, -5) with diffuse shading
-- Green sphere at position (0.0, 0, -5) with ambient and directional lighting
-- Blue sphere at position (1.5, 0, -5) with sky gradient reflections
+The scene includes:
+- A default cube and sphere with customizable properties.
+- A checkerboard floor with adjustable colors and tile size.
+- A dynamic light source simulating sunlight with shadow casting.
+- A sky gradient with a glowing sun effect for immersive backgrounds.
+- Interactive GUI for real-time scene editing.
 
 ## Requirements
 
-- **MSYS2** (for Windows development environment)
-- **MinGW-w64** (C++ compiler with C++11 support for std::thread)
-- **SDL2** (graphics library)
+- **MSYS2** (for Windows development environment, optional if using Visual Studio)
+- **MinGW-w64** (C++ compiler with C++11 support, optional)
+- **SDL2** (graphics library, Visual Studio compatible version)
+- **CUDA Toolkit** (v12.9 or compatible, for GPU acceleration)
+- **ImGui** (source files included in `imgui/` directory)
+- **NVIDIA GPU** (compute capability 8.9 or compatible, e.g., RTX 4090)
 
 ## Installation
 
-### Setting up MSYS2 Environment
+### Setting up the Environment
 
-1. Install MSYS2 from https://www.msys2.org/
-
-2. Open MSYS2 terminal and update the package database:
-```bash
-pacman -Syu
-```
-
-3. Install the required development tools and SDL2:
-```bash
-pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-SDL2
-```
+1. **Install CUDA Toolkit**: Download and install CUDA Toolkit v12.9 from [NVIDIA's website](https://developer.nvidia.com/cuda-downloads).
+2. **Install SDL2**: Download the Visual Studio development libraries (`SDL2-VC`) from [libsdl.org](https://www.libsdl.org/) and extract to a directory (e.g., `SDL2-VC/`).
+3. **ImGui**: Ensure the ImGui source files (`imgui.h`, `imgui.cpp`, `imgui_demo.cpp`, `imgui_draw.cpp`, `imgui_tables.cpp`, `imgui_widgets.cpp`, `imgui_impl_sdl2.h`, `imgui_impl_sdl2.cpp`, `imgui_impl_sdlrenderer2.h`, `imgui_impl_sdlrenderer2.cpp`) are in the `imgui/` directory.
+4. **Optional MSYS2 Setup** (for MinGW-based builds):
+   - Install MSYS2 from [https://www.msys2.org/](https://www.msys2.org/).
+   - Update the package database:
+     ```bash
+     pacman -Syu
+     ```
+   - Install MinGW-w64 and SDL2:
+     ```bash
+     pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-SDL2
+     ```
 
 ### Building the Ray Tracer
 
 1. Clone the repository:
-```bash
-git clone https://github.com/Jigen-Ohtsusuki/ray-tracer.git
-cd ray-tracer
-```
+   ```bash
+   git clone https://github.com/Jigen-Ohtsusuki/ray-tracer.git
+   cd ray-tracer
+   ```
 
-2. Compile the C++ source with threading support:
-```bash
-g++ raytracer.cpp -o raytracer.exe -std=c++17 -DSDL_MAIN_HANDLED -IC:/msys64/ucrt64/include/SDL2 -LC:/msys64/ucrt64/lib -lSDL2 -lmingw32 -mconsole -pthread -O3
-```
+2. Ensure the `SDL2-VC` directory is in the project root or adjust the include/library paths in the build command accordingly.
+3. Ensure the CUDA Toolkit is installed and `nvcc` is accessible in your PATH.
 
-3. Run the ray tracer:
-```bash
-./raytracer.exe
-```
+4. Compile the source using `nvcc`:
+   ```bash
+   nvcc raytracer_cuda.cu imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/imgui_impl_sdl2.cpp imgui/imgui_impl_sdlrenderer2.cpp -o raytracer_cuda.exe -std=c++17 -DSDL_MAIN_HANDLED -I./imgui -I"./SDL2-VC/include/" -L"./SDL2-VC/lib/x64" -L"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/lib/x64" -lSDL2 -lSDL2main -lcudart -lcomdlg32 -arch=compute_89 -code=sm_89
+   ```
+
+5. Run the ray tracer:
+   ```bash
+   ./raytracer_cuda.exe
+   ```
 
 ## Controls
 
 | Key | Action |
 |-----|--------|
-| W | Move forward |
-| S | Move backward |
-| A | Move left |
-| D | Move right |
-| Q | Move up |
-| E | Move down |
-| ← | Turn left |
-| → | Turn right |
-| ↑ | Look up |
-| ↓ | Look down |
+| W | Move camera forward |
+| S | Move camera backward |
+| A | Move camera left |
+| D | Move camera right |
+| Space | Move camera up |
+| Ctrl | Move camera down |
+| Arrow Keys | Look around |
+| Mouse Drag | Look around |
+| Mouse Wheel | Move forward/backward |
+| Tab | Toggle GUI |
+| R | Reset camera |
+| Esc | Exit |
 
 ## Technical Details
 
-### Advanced Lighting System
+### GPU-Accelerated Rendering
 
-The ray tracer implements a sophisticated lighting model:
-
-1. **Directional Sun Light**: Simulates sunlight with proper direction and intensity
-2. **Lambertian Diffuse Shading**: Realistic surface lighting based on surface normal and light direction
-3. **Hemispherical Ambient Lighting**: Sky-facing surfaces receive more ambient light
-4. **Sky Gradient Background**: Natural-looking sky gradient for rays that don't hit objects
+The ray tracer leverages CUDA for parallel processing:
+- **Kernel Design**: The `render_kernel` distributes ray tracing across CUDA threads, handling pixel calculations in parallel.
+- **Memory Management**: Dynamic allocation and transfer of triangle, light, and floor data to GPU memory.
+- **Performance**: Achieves real-time performance with complex scenes, optimized for NVIDIA GPUs with compute capability 8.9.
 
 ```cpp
-// Lambertian diffuse lighting
-float diff = std::max(0.0f, hit_normal.dot(-sun.direction));
-Vec3 diffuse = sun.color * sun.intensity * diff;
-
-// Hemispherical ambient skylight
-Vec3 sky_color = {0.4f, 0.6f, 1.0f}; // sky blue
-float sky_factor = std::max(0.0f, hit_normal.y); // how much surface faces up
-Vec3 ambient = sky_color * 0.2f * sky_factor;
-```
-
-### Multi-threading Architecture
-
-The ray tracer implements an efficient multi-threading strategy:
-
-1. **Thread Detection**: Automatically detects available CPU cores using `std::thread::hardware_concurrency()`
-2. **Row-based Partitioning**: Divides screen rows evenly among threads
-3. **Lambda-based Work Distribution**: Clean thread function implementation using lambdas
-4. **Synchronization**: Uses `std::thread::join()` to ensure all threads complete before frame presentation
-
-```cpp
-int num_threads = std::thread::hardware_concurrency();
-if (num_threads == 0) num_threads = 4; // fallback
-
-std::vector<std::thread> threads;
-int rows_per_thread = HEIGHT / num_threads;
-
-auto render_chunk = [&](int start_y, int end_y) {
-    for (int y = start_y; y < end_y; ++y) {
-        for (int x = 0; x < WIDTH; ++x) {
-            Vec3 dir = get_ray_dir(x, y, FOV, aspect, cam_yaw, cam_pitch);
-            Vec3 color = trace({cam_pos, dir});
-            // Convert to pixel color and write to buffer
-        }
-    }
-};
-```
-
-### Ray Tracing Pipeline
-
-The enhanced ray tracing algorithm includes:
-
-1. **Ray Generation**: Parallel ray generation for each pixel
-2. **Sphere Intersection**: Efficient ray-sphere intersection testing
-3. **Lighting Calculation**: Comprehensive lighting model with multiple light sources
-4. **Color Composition**: Proper color mixing and clamping
-5. **Background Rendering**: Sky gradient for non-intersecting rays
-
-```cpp
-Vec3 trace(const Ray& ray, int depth = 0) {
-    // Find closest intersection
-    float closest_t = 1e9;
-    Vec3 hit_normal, hit_color;
-    bool hit = false;
-
-    for (const auto& sphere : spheres) {
-        float t;
-        Vec3 n, c;
-        if (intersect_sphere(ray, sphere, t, n, c) && t < closest_t) {
-            closest_t = t;
-            hit = true;
-            hit_normal = n;
-            hit_color = c;
-        }
-    }
-
-    if (!hit) {
-        // Sky gradient background
-        float t = 0.5f * (ray.direction.y + 1.0f);
-        return Vec3(1.0f, 1.0f, 1.0f) * (1.0f - t) + Vec3(0.4f, 0.6f, 1.0f) * t;
-    }
-
-    // Apply lighting model
-    float diff = std::max(0.0f, hit_normal.dot(-sun.direction));
-    Vec3 diffuse = sun.color * sun.intensity * diff;
+__global__ void render_kernel(uint32_t* pixel_buffer, Triangle* triangles, int num_triangles, Light light, FloorPlane floor_plane, 
+                             Vec3 cam_pos, float cam_yaw, float cam_pitch, float fov, int render_width, int render_height, int selected_mesh) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
     
-    Vec3 sky_color = {0.4f, 0.6f, 1.0f};
-    float sky_factor = std::max(0.0f, hit_normal.y);
-    Vec3 ambient = sky_color * 0.2f * sky_factor;
-
-    Vec3 lighting = ambient + diffuse;
-    return hit_color * lighting;
+    if (x >= render_width || y >= render_height) return;
+    
+    float aspect = (float)render_width / render_height;
+    Vec3 ray_dir = get_ray_dir(x, y, fov, aspect, cam_yaw, cam_pitch, render_width, render_height);
+    Ray ray = {cam_pos, ray_dir};
+    Vec3 color = trace(ray, triangles, num_triangles, light, floor_plane, selected_mesh);
+    // Write to pixel buffer
 }
 ```
 
-### Enhanced Vector Mathematics
+### Scene Management
 
-The improved `Vec3` structure supports comprehensive 3D operations:
+- **Triangle Meshes**: Supports complex geometry via triangle-based meshes with transformation (position, rotation, scale).
+- **OBJ Loader**: Parses OBJ files to import custom 3D models, converting faces to triangles.
+- **Dynamic Scene**: Add cubes, spheres, or OBJ models, with real-time editing of properties via ImGui.
 
 ```cpp
-struct Vec3 {
-    float x, y, z;
+bool load_obj(const std::string& filename, Mesh& mesh, int mesh_index) {
+    // Parse vertices and faces from OBJ file
+    // Convert to triangles with associated mesh index
+}
+```
 
-    Vec3() : x(0), y(0), z(0) {}
-    Vec3(float x, float y, float z) : x(x), y(y), z(z) {}
+### Lighting System
 
-    Vec3 operator+(Vec3 o) const { return {x + o.x, y + o.y, z + o.z}; }
-    Vec3 operator-(Vec3 o) const { return {x - o.x, y - o.y, z - o.z}; }
-    Vec3 operator-() const { return {-x, -y, -z}; }
-    Vec3 operator*(float s) const { return {x * s, y * s, z * s}; }
-    Vec3 operator*(Vec3 o) const { return {x * o.x, y * o.y, z * o.z}; }
-    Vec3 operator/(float s) const { return {x / s, y / s, z / s}; }
-    float dot(Vec3 o) const { return x * o.x + y * o.y + z * o.z; }
-    Vec3 normalized() const;
-};
+The lighting model includes:
+- **Diffuse Lighting**: Calculated with `max(0, normal · light_dir)` for realistic surface illumination.
+- **Hard Shadows**: GPU-based shadow rays test for occlusions, enhancing realism.
+- **Ambient Lighting**: Hemispherical ambient with sky color for natural indirect light.
+- **Sun-like Light**: High-intensity, directional light with customizable position, color, and intensity.
+
+```cpp
+__device__ Vec3 trace(const Ray& ray, const Triangle* triangles, int num_triangles, const Light& light, const FloorPlane& floor_plane, int selected_mesh, int depth) {
+    // Check intersections with triangles and floor
+    // Compute diffuse, ambient, and shadow effects
+    // Apply sun-like attenuation and sky glow
+}
+```
+
+### ImGui Interface
+
+The ImGui-based GUI provides:
+- **Scene Control**: Add/delete objects, adjust position, rotation, scale, and color.
+- **Light Editing**: Modify light position, color, and intensity, with a sunlight preset.
+- **Floor Customization**: Adjust floor height, tile size, and checkerboard colors.
+- **Performance Metrics**: Displays FPS, frame time, triangle count, and resolution.
+- **Resolution Presets**: Quick selection of common resolutions for performance tuning.
+
+```cpp
+void render_gui() {
+    ImGui::Begin("Ray Tracer Controls");
+    if (ImGui::CollapsingHeader("3D Objects")) {
+        // Add cube, sphere, or OBJ
+        // Edit selected mesh properties
+    }
+    // Camera, light, floor, and performance controls
+}
 ```
 
 ### Performance Optimizations
 
-- **Multi-threading**: Utilizes all CPU cores for parallel rendering
-- **C++ Implementation**: Native compiled code for maximum performance
-- **Efficient Memory Management**: Direct pixel buffer access with SDL2
-- **Optimized Vector Operations**: Custom Vec3 struct with inlined operations
-- **Minimal Thread Overhead**: Efficient thread creation and synchronization
-- **Color Clamping**: Prevents overflow while maintaining performance
-
-### Camera System
-
-The camera supports full 6DOF movement with separate pitch and yaw controls:
-
-```cpp
-// Movement vectors based on yaw
-Vec3 forward = {-sin(cam_yaw), 0, -cos(cam_yaw)};
-Vec3 right   = {cos(cam_yaw), 0, -sin(cam_yaw)};
-
-// Ray direction calculation with pitch/yaw rotation
-Vec3 get_ray_dir(int x, int y, float fov, float aspect, float yaw, float pitch);
-```
+- **CUDA Parallelism**: Distributes rendering across thousands of GPU threads.
+- **Efficient Memory Transfers**: Minimizes host-to-device data transfers by updating only changed scene data.
+- **Dynamic Resolution**: Balances performance and quality with adjustable render resolution.
+- **Triangle Transformations**: Applied on GPU to reduce CPU workload.
+- **Error Checking**: Robust CUDA error handling with `CUDA_CHECK` macro.
 
 ## Configuration
 
-You can modify these constants in the code:
+Modify these constants in the code:
 
 ```cpp
-const int WIDTH = 640;
-const int HEIGHT = 360;
+int WIDTH = 800; // Window width
+int HEIGHT = 600; // Window height
+int RENDER_WIDTH = 400; // Render resolution
+int RENDER_HEIGHT = 300;
 const float FOV = 60.0f;
-
-// Lighting parameters
-const Vec3 AMBIENT_LIGHT = {0.1f, 0.1f, 0.1f};
-Light sun = {
-    .direction = Vec3{0.5f, -1.0f, -1.0f}.normalized(),
-    .color = {1.0f, 1.0f, 1.0f},
-    .intensity = 1.0f
-};
+Light light = {{5, 10, 5}, {1.0f, 0.95f, 0.9f}, 10.0f}; // Sun-like light
+FloorPlane floor_plane = {-2.0f, {0.8f, 0.8f, 0.8f}, {0.6f, 0.6f, 0.6f}, 2.0f};
 ```
 
 ### High Resolution Rendering
 
-With multi-threading and optimized lighting, the implementation can handle higher resolutions:
-
-```cpp
-// For high resolution (excellent performance expected)
-const int WIDTH = 1920;
-const int HEIGHT = 1080;
-
-// For ultra-high resolution (still very usable)
-const int WIDTH = 2560;
-const int HEIGHT = 1440;
-```
+The CUDA implementation supports high resolutions efficiently:
+- **800x600**: Real-time performance with complex scenes.
+- **1920x1080**: Usable with optimized settings for high-quality output.
 
 ## Mathematical Foundation
 
-### Ray-Sphere Intersection
+### Ray-Triangle Intersection
 
-The ray tracer uses the geometric ray-sphere intersection formula:
+Uses the Möller-Trumbore algorithm for efficient ray-triangle intersection:
+- **Equation**: Solves `ray.origin + t * ray.direction = (1-u-v) * v0 + u * v1 + v * v2`.
+- **Barycentric Coordinates**: Ensures hit point lies within triangle bounds.
 
-Given a ray `P(t) = O + t*D` and sphere center `C` with radius `r`:
-- `(O + t*D - C) · (O + t*D - C) = r²`
-- Expanding gives quadratic: `at² + bt + c = 0`
-- Where: `a = D·D`, `b = 2(O-C)·D`, `c = (O-C)·(O-C) - r²`
+```cpp
+__device__ bool intersect_triangle(const Ray& ray, const Triangle& tri, float& t, Vec3& normal) {
+    // Möller-Trumbore intersection
+}
+```
 
 ### Lighting Model
 
-The lighting system implements:
-- **Lambertian Diffuse**: `L_diffuse = I * max(0, N · L)`
-- **Hemispherical Ambient**: `L_ambient = sky_color * max(0, N.y) * ambient_factor`
-- **Sky Gradient**: `color = (1-t) * white + t * sky_blue` where `t = 0.5 * (ray.y + 1)`
-
-### Camera Transformation
-
-The camera system implements:
-- **Perspective projection** with configurable FOV
-- **Pitch rotation** (look up/down) around X-axis
-- **Yaw rotation** (turn left/right) around Y-axis
-- **Proper aspect ratio** handling to prevent distortion
+- **Diffuse**: `L_diffuse = I * max(0, N · L) * attenuation`.
+- **Ambient**: `L_ambient = sky_color * max(0, N.y) * 0.15`.
+- **Shadow**: Tests occlusion with shadow rays.
+- **Sky Gradient**: `color = (1-t) * horizon + t * zenith + sun_glow`.
 
 ## Performance Comparison
 
-### Evolution of Performance
-
-**Test System**: 13th Gen Intel i7 HX Series Processor
+**Test System**: NVIDIA RTX 4050, Intel i7-13700HX
 
 | Version | Resolution | FPS | Visual Quality | Notes |
 |---------|------------|-----|----------------|-------|
-| Python  | 160x90     | ~5 fps | Basic colors | Original implementation |
-| Python  | 640x360    | ~0.5 fps | Basic colors | Unusably slow |
-| C++ Single-thread | 640x360 | 60-80 fps | Basic colors | 120x+ improvement |
-| C++ Multi-thread | 640x360 | 200+ fps | Basic colors | 3x+ improvement over single-thread |
-| **C++ Multi-thread + Lighting** | **640x360** | **120-140 fps** | **Realistic lighting** | **Current version** |
-| C++ Multi-thread + Lighting | 1920x1080 | 20-30 fps | Realistic lighting | Usable at full HD! |
+| Previous C++ Multi-thread | 640x360 | 120-140 | Realistic lighting | CPU-based |
+| **CUDA Ray Tracer** | **800x600** | **200-300** | **Enhanced lighting, shadows** | **Current version** |
+| CUDA Ray Tracer | 1920x1080 | 30-40 | Enhanced lighting, shadows | High quality |
 
-### Multi-threading Performance with Lighting
+### Performance Benefits
 
-**Test System**: 13th Gen Intel i7 HX Series Processor
+- **GPU Acceleration**: CUDA provides 2-3x performance over CPU multi-threading.
+- **Shadows and Lighting**: Adds hard shadows and sun-like lighting with minimal performance cost.
+- **Scalability**: Handles thousands of triangles efficiently due to GPU parallelism.
 
-The performance impact of adding realistic lighting:
-- **30% performance cost** for significantly improved visual quality
-- **Still real-time** at 120-140 FPS with full lighting calculations
-- **Scales well** with resolution due to efficient multi-threading
-- **Excellent visual-to-performance ratio**
+## Build Script
 
-### Visual Quality Improvements
-
-**Lighting System Benefits**:
-- **Realistic shading** with proper light-surface interaction
-- **Natural-looking shadows** and highlights
-- **Sky gradient background** instead of solid black
-- **Hemispherical ambient lighting** for realistic indirect illumination
-- **Proper color mixing** and saturation control
-
-## Build Script (Recommended)
-
-Create a `build.sh` file for easier compilation with all optimizations:
+Create a `build.sh` for easier compilation:
 
 ```bash
 #!/bin/bash
-g++ raytracer.cpp -o raytracer.exe \
-    -std=c++17 \
-    -DSDL_MAIN_HANDLED \
-    -IC:/msys64/ucrt64/include/SDL2 \
-    -LC:/msys64/ucrt64/lib \
-    -lSDL2 \
-    -lmingw32 \
-    -mconsole \
-    -pthread \
-    -O3 \
-    -march=native \
-    -flto
+nvcc raytracer_cuda.cu imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp imgui/imgui_impl_sdl2.cpp imgui/imgui_impl_sdlrenderer2.cpp -o raytracer_cuda.exe -std=c++17 -DSDL_MAIN_HANDLED -I./imgui -I"./SDL2-VC/include/" -L"./SDL2-VC/lib/x64" -L"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9/lib/x64" -lSDL2 -lSDL2main -lcudart -lcomdlg32 -arch=compute_89 -code=sm_89
 ```
 
-## Thread Safety and Considerations
+## Thread Safety and GPU Considerations
 
-- **Memory Access**: Each thread writes to non-overlapping pixel regions
-- **Shared Data**: Spheres vector, lighting parameters, and camera data are read-only during rendering
-- **SDL Surface**: Surface is locked/unlocked around the entire multi-threaded operation
-- **No Mutexes Required**: Clean parallelization without synchronization overhead
-- **Color Clamping**: Thread-safe color operations with proper bounds checking
+- **CUDA Memory**: Manages GPU memory with proper allocation and cleanup.
+- **Thread Safety**: ImGui and SDL interactions are single-threaded; CUDA handles parallel rendering.
+- **Error Handling**: Robust CUDA error checking ensures stability.
+- **No CPU Bottlenecks**: Scene transformations and rendering are offloaded to GPU.
 
 ## Completed Features
 
-- [x] **Multi-threading for improved performance**: Implemented efficient row-based parallel rendering
-- [x] **Advanced lighting system**: Lambertian diffuse + hemispherical ambient lighting
-- [x] **Sky gradient background**: Natural-looking sky instead of solid black
-- [x] **Real-time performance**: Achieved 120-140 FPS at 640x360 with full lighting
-- [x] **Enhanced vector mathematics**: Comprehensive Vec3 operations for 3D calculations
-- [x] **Proper ray tracing pipeline**: Modular intersection, lighting, and color composition
+- [x] **GPU Acceleration**: CUDA-based rendering for massive performance gains.
+- [x] **Triangle Meshes**: Support for complex geometry and OBJ import.
+- [x] **ImGui Interface**: Interactive GUI for scene editing.
+- [x] **Hard Shadows**: GPU-accelerated shadow casting.
+- [x] **Checkerboard Floor**: Dynamic tiled floor for scene context.
+- [x] **Sun-like Lighting**: Enhanced light model with glowing sun effect.
+- [x] **Dynamic Scene Management**: Add, edit, and delete objects in real-time.
 
 ## Future Enhancements
 
-- [ ] **Reflections and Refractions**: Recursive ray tracing for mirror and glass materials
-- [ ] **Shadows**: Shadow rays for realistic shadow casting
-- [ ] **Multiple Light Sources**: Point lights, spot lights, and area lights
-- [ ] **Materials System**: Different surface properties (metallic, dielectric, emissive)
-- [ ] **Anti-aliasing**: Multi-sample anti-aliasing for smoother edges
-- [ ] **Spatial Acceleration**: BVH or octree for scenes with many objects
-- [ ] **Post-processing**: Bloom, tone mapping, and gamma correction
-- [ ] **Volumetric Lighting**: Atmospheric scattering and fog effects
-- [ ] **SIMD Optimizations**: Vectorized lighting calculations
-- [ ] **GPU Computing**: CUDA or OpenCL implementation for even higher performance
+- [ ] **Reflections and Refractions**: Add recursive ray tracing for reflective/refractive materials.
+- [ ] **Soft Shadows**: Implement area lights for softer shadows.
+- [ ] **Material System**: Support metallic, dielectric, and emissive materials.
+- [ ] **Anti-Aliasing**: Add MSAA or supersampling for smoother edges.
+- [ ] **BVH Acceleration**: Implement bounding volume hierarchy for faster intersections.
+- [ ] **Post-Processing**: Add bloom, tone mapping, and gamma correction.
+- [ ] **Volumetric Effects**: Implement fog and atmospheric scattering.
+- [ ] **Texture Support**: Add texture mapping for meshes.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly on multi-core systems
-5. Submit a pull request
+1. Fork the repository.
+2. Create a feature branch.
+3. Make changes and test on CUDA-capable hardware (compute capability 8.9 recommended).
+4. Submit a pull request.
 
 ## Acknowledgments
 
-- Advanced lighting algorithms based on physically-based rendering techniques
-- Multi-threading implementation using modern C++ std::thread
-- Ray tracing algorithms based on classic computer graphics techniques
-- Built with C++ and SDL2 for maximum performance
-- Significant performance improvements through parallel processing
-- Realistic lighting model for enhanced visual quality
+- CUDA for GPU acceleration.
+- ImGui for intuitive GUI implementation.
+- SDL2 for cross-platform rendering and input handling.
+- Möller-Trumbore algorithm for ray-triangle intersection.
+- Physically-based rendering techniques for lighting.
