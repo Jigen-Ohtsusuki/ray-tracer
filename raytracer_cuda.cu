@@ -82,11 +82,40 @@ struct Triangle {
     Vec3 normal;
     Vec3 color;
     int mesh_index;
+    float padding[3]; // Align to 16 bytes for CUDA
     
     __host__ __device__ Triangle() : mesh_index(-1) {}
     __host__ __device__ Triangle(Vec3 a, Vec3 b, Vec3 c, Vec3 col, int mi = -1) : v0(a), v1(b), v2(c), color(col), mesh_index(mi) {
         normal = (v1 - v0).cross(v2 - v0).normalized();
     }
+};
+
+struct AABB {
+    Vec3 min, max;
+    __host__ __device__ AABB() : min(Vec3(1e9f, 1e9f, 1e9f)), max(Vec3(-1e9f, -1e9f, -1e9f)) {}
+    __host__ __device__ void expand(const Vec3& p) {
+        min.x = fminf(min.x, p.x); min.y = fminf(min.y, p.y); min.z = fminf(min.z, p.z);
+        max.x = fmaxf(max.x, p.x); max.y = fmaxf(max.y, p.y); max.z = fmaxf(max.z, p.z);
+    }
+    __host__ __device__ bool intersect(const Ray& ray, float& t_min, float& t_max) const {
+        float t1 = (min.x - ray.origin.x) / ray.direction.x;
+        float t2 = (max.x - ray.origin.x) / ray.direction.x;
+        t_min = fminf(t1, t2); t_max = fmaxf(t1, t2);
+        t1 = (min.y - ray.origin.y) / ray.direction.y;
+        t2 = (max.y - ray.origin.y) / ray.direction.y;
+        t_min = fmaxf(t_min, fminf(t1, t2)); t_max = fminf(t_max, fmaxf(t1, t2));
+        t1 = (min.z - ray.origin.z) / ray.direction.z;
+        t2 = (max.z - ray.origin.z) / ray.direction.z;
+        t_min = fmaxf(t_min, fminf(t1, t2)); t_max = fminf(t_max, fmaxf(t1, t2));
+        return t_max >= t_min && t_max >= 0;
+    }
+};
+
+struct BVHNode {
+    AABB bounds;
+    int left, right;
+    int first_triangle, num_triangles;
+    __host__ __device__ BVHNode() : left(-1), right(-1), first_triangle(-1), num_triangles(0) {}
 };
 
 struct Mesh {
@@ -136,6 +165,7 @@ int selected_mesh = -1;
 
 // GPU data
 Triangle* d_triangles = nullptr;
+BVHNode* d_bvh_nodes = nullptr;
 int num_triangles = 0;
 Light* d_light = nullptr;
 FloorPlane* d_floor_plane = nullptr;
@@ -266,6 +296,53 @@ void create_sphere(Mesh& mesh, float radius, int mesh_index, int segments = 16) 
     }
 }
 
+std::vector<BVHNode> build_bvh(std::vector<Triangle>& triangles) {
+    std::vector<BVHNode> nodes;
+    if (triangles.empty()) return nodes;
+    
+    nodes.resize(triangles.size() * 2); // Reserve space
+    int node_idx = 0;
+    
+    auto split = [&](int start, int count, int depth, auto& split_ref) -> int {
+        if (count <= 4 || depth > 20) { // Leaf node
+            nodes[node_idx].first_triangle = start;
+            nodes[node_idx].num_triangles = count;
+            for (int i = start; i < start + count; ++i) {
+                nodes[node_idx].bounds.expand(triangles[i].v0);
+                nodes[node_idx].bounds.expand(triangles[i].v1);
+                nodes[node_idx].bounds.expand(triangles[i].v2);
+            }
+            return node_idx++;
+        }
+        
+        // Simple median split along x-axis
+        std::sort(triangles.begin() + start, triangles.begin() + start + count,
+            [](const Triangle& a, const Triangle& b) {
+                Vec3 ca = (a.v0 + a.v1 + a.v2) * (1.0f / 3.0f);
+                Vec3 cb = (b.v0 + b.v1 + b.v2) * (1.0f / 3.0f);
+                return ca.x < cb.x;
+            });
+        
+        int mid = start + count / 2;
+        int current = node_idx++;
+        nodes[current].left = split_ref(start, mid - start, depth + 1, split_ref);
+        nodes[current].right = split_ref(mid, count - (mid - start), depth + 1, split_ref);
+        nodes[current].bounds = nodes[nodes[current].left].bounds;
+        // Merge bounds of left and right children
+        nodes[current].bounds.min.x = fminf(nodes[current].bounds.min.x, nodes[nodes[current].right].bounds.min.x);
+        nodes[current].bounds.min.y = fminf(nodes[current].bounds.min.y, nodes[nodes[current].right].bounds.min.y);
+        nodes[current].bounds.min.z = fminf(nodes[current].bounds.min.z, nodes[nodes[current].right].bounds.min.z);
+        nodes[current].bounds.max.x = fmaxf(nodes[current].bounds.max.x, nodes[nodes[current].right].bounds.max.x);
+        nodes[current].bounds.max.y = fmaxf(nodes[current].bounds.max.y, nodes[nodes[current].right].bounds.max.y);
+        nodes[current].bounds.max.z = fmaxf(nodes[current].bounds.max.z, nodes[nodes[current].right].bounds.max.z);
+        return current;
+    };
+    
+    split(0, triangles.size(), 0, split);
+    nodes.resize(node_idx); // Trim unused nodes
+    return nodes;
+}
+
 __host__ __device__ Vec3 rotate_y_vector(Vec3 v, float cos_y, float sin_y) {
     return Vec3(v.x * cos_y + v.z * sin_y, v.y, -v.x * sin_y + v.z * cos_y);
 }
@@ -343,29 +420,43 @@ __device__ Vec3 get_sky_color(const Vec3& ray_dir, const Light& light) {
     
     Vec3 light_dir = light.position.normalized();
     float sun_dot = fmaxf(0.0f, ray_dir.dot(light_dir));
-    float sun_glow = powf(sun_dot, 32.0f) * 0.5f; // Increased glow for brighter sun
-    Vec3 sun_color = light.color; // Use light color for sun
+    float sun_glow = powf(sun_dot, 32.0f) * 0.5f;
+    Vec3 sun_color = light.color;
     
     Vec3 base_color = horizon_color * (1.0f - t) + zenith_color * t;
     return base_color + sun_color * sun_glow;
 }
 
-__device__ bool is_in_shadow(Vec3 point, Vec3 light_pos, const Triangle* triangles, int num_triangles) {
+__device__ bool is_in_shadow(Vec3 point, Vec3 light_pos, const Triangle* triangles, int num_triangles, const BVHNode* bvh_nodes) {
     Vec3 light_dir = (light_pos - point).normalized();
     float light_distance = (light_pos - point).length();
     Ray shadow_ray = {point + light_dir * 0.001f, light_dir};
     
-    for (int i = 0; i < num_triangles; ++i) {
-        float t;
-        Vec3 normal;
-        if (intersect_triangle(shadow_ray, triangles[i], t, normal) && t < light_distance) {
-            return true;
+    int stack[64];
+    int stack_ptr = 0;
+    stack[stack_ptr++] = 0; // Root node
+    while (stack_ptr > 0) {
+        int node_idx = stack[--stack_ptr];
+        const BVHNode& node = bvh_nodes[node_idx];
+        float t_min, t_max;
+        if (!node.bounds.intersect(shadow_ray, t_min, t_max) || t_max < 0 || t_min > light_distance) continue;
+        if (node.num_triangles > 0) {
+            for (int i = node.first_triangle; i < node.first_triangle + node.num_triangles; ++i) {
+                float t;
+                Vec3 normal;
+                if (intersect_triangle(shadow_ray, triangles[i], t, normal) && t < light_distance) {
+                    return true;
+                }
+            }
+        } else {
+            stack[stack_ptr++] = node.left;
+            stack[stack_ptr++] = node.right;
         }
     }
     return false;
 }
 
-__device__ Vec3 trace(const Ray& ray, const Triangle* triangles, int num_triangles, const Light& light, const FloorPlane& floor_plane, int selected_mesh, int depth = 0) {
+__device__ Vec3 trace(const Ray& ray, const Triangle* triangles, int num_triangles, const BVHNode* bvh_nodes, const Light& light, const FloorPlane& floor_plane, int selected_mesh, int depth = 0) {
     float closest_t = 1e9;
     Vec3 hit_normal, hit_color;
     Vec3 hit_point;
@@ -374,8 +465,7 @@ __device__ Vec3 trace(const Ray& ray, const Triangle* triangles, int num_triangl
 
     // Check floor intersection
     float floor_t;
-    Vec3 floor_normal;
-    Vec3 floor_color;
+    Vec3 floor_normal, floor_color;
     if (intersect_floor(ray, floor_t, floor_normal, floor_color, floor_plane) && floor_t < closest_t) {
         closest_t = floor_t;
         hit = true;
@@ -384,17 +474,31 @@ __device__ Vec3 trace(const Ray& ray, const Triangle* triangles, int num_triangl
         hit_point = ray.origin + ray.direction * floor_t;
     }
 
-    // Check triangle intersections
-    for (int i = 0; i < num_triangles; ++i) {
-        float t;
-        Vec3 normal;
-        if (intersect_triangle(ray, triangles[i], t, normal) && t < closest_t) {
-            closest_t = t;
-            hit = true;
-            hit_normal = normal;
-            hit_color = triangles[i].color;
-            hit_point = ray.origin + ray.direction * t;
-            hit_mesh_index = triangles[i].mesh_index;
+    // BVH traversal
+    int stack[64];
+    int stack_ptr = 0;
+    stack[stack_ptr++] = 0; // Root node
+    while (stack_ptr > 0) {
+        int node_idx = stack[--stack_ptr];
+        const BVHNode& node = bvh_nodes[node_idx];
+        float t_min, t_max;
+        if (!node.bounds.intersect(ray, t_min, t_max) || t_max < 0 || t_min > closest_t) continue;
+        if (node.num_triangles > 0) {
+            for (int i = node.first_triangle; i < node.first_triangle + node.num_triangles; ++i) {
+                float t;
+                Vec3 normal;
+                if (intersect_triangle(ray, triangles[i], t, normal) && t < closest_t) {
+                    closest_t = t;
+                    hit = true;
+                    hit_normal = normal;
+                    hit_color = triangles[i].color;
+                    hit_point = ray.origin + ray.direction * t;
+                    hit_mesh_index = triangles[i].mesh_index;
+                }
+            }
+        } else {
+            stack[stack_ptr++] = node.left;
+            stack[stack_ptr++] = node.right;
         }
     }
 
@@ -414,21 +518,21 @@ __device__ Vec3 trace(const Ray& ray, const Triangle* triangles, int num_triangl
     Vec3 light_dir = (light.position - hit_point).normalized();
     float light_distance = (light.position - hit_point).length();
     
-    // Sun-like attenuation: softer falloff for distant light
+    // Sun-like attenuation
     float attenuation = 1.0f / (1.0f + 0.01f * light_distance + 0.001f * light_distance * light_distance);
 
     // Shadow test
-    bool in_shadow = is_in_shadow(hit_point, light.position, triangles, num_triangles);
+    bool in_shadow = is_in_shadow(hit_point, light.position, triangles, num_triangles, bvh_nodes);
     
     // Diffuse lighting calculation
     float diffuse_strength = fmaxf(0.0f, hit_normal.dot(light_dir));
     
-    // Lighting model: enhanced for sunlight
-    Vec3 ambient = Vec3(0.4f, 0.6f, 1.0f) * 0.15f * fmaxf(0.0f, hit_normal.y); // Reduced ambient for contrast
+    // Lighting model
+    Vec3 ambient = Vec3(0.4f, 0.6f, 1.0f) * 0.15f * fmaxf(0.0f, hit_normal.y);
     Vec3 diffuse = light.color * light.intensity * diffuse_strength * attenuation;
     
     if (in_shadow) {
-        diffuse = diffuse * 0.05f; // Sharper shadows for sunlight
+        diffuse = diffuse * 0.05f;
     }
     
     // Combine lighting
@@ -466,7 +570,7 @@ __device__ Vec3 get_ray_dir(int x, int y, float fov, float aspect, float yaw, fl
     return dir.normalized();
 }
 
-__global__ void render_kernel(uint32_t* pixel_buffer, Triangle* triangles, int num_triangles, Light light, FloorPlane floor_plane, 
+__global__ void render_kernel(uint32_t* pixel_buffer, Triangle* triangles, int num_triangles, BVHNode* bvh_nodes, Light light, FloorPlane floor_plane, 
                              Vec3 cam_pos, float cam_yaw, float cam_pitch, float fov, int render_width, int render_height, int selected_mesh) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -476,7 +580,7 @@ __global__ void render_kernel(uint32_t* pixel_buffer, Triangle* triangles, int n
     float aspect = (float)render_width / render_height;
     Vec3 ray_dir = get_ray_dir(x, y, fov, aspect, cam_yaw, cam_pitch, render_width, render_height);
     Ray ray = {cam_pos, ray_dir};
-    Vec3 color = trace(ray, triangles, num_triangles, light, floor_plane, selected_mesh);
+    Vec3 color = trace(ray, triangles, num_triangles, bvh_nodes, light, floor_plane, selected_mesh);
     
     uint8_t r = (uint8_t)(clamp(color.x, 0.0f, 1.0f) * 255.0f);
     uint8_t g = (uint8_t)(clamp(color.y, 0.0f, 1.0f) * 255.0f);
@@ -488,6 +592,7 @@ __global__ void render_kernel(uint32_t* pixel_buffer, Triangle* triangles, int n
 
 void update_gpu_scene_data() {
     if (d_triangles) CUDA_CHECK(cudaFree(d_triangles));
+    if (d_bvh_nodes) CUDA_CHECK(cudaFree(d_bvh_nodes));
     
     std::vector<Triangle> all_triangles;
     for (size_t i = 0; i < meshes.size(); ++i) {
@@ -501,8 +606,11 @@ void update_gpu_scene_data() {
     num_triangles = all_triangles.size();
     
     if (num_triangles > 0) {
+        std::vector<BVHNode> bvh_nodes = build_bvh(all_triangles);
         CUDA_CHECK(cudaMalloc(&d_triangles, num_triangles * sizeof(Triangle)));
         CUDA_CHECK(cudaMemcpy(d_triangles, all_triangles.data(), num_triangles * sizeof(Triangle), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMalloc(&d_bvh_nodes, bvh_nodes.size() * sizeof(BVHNode)));
+        CUDA_CHECK(cudaMemcpy(d_bvh_nodes, bvh_nodes.data(), bvh_nodes.size() * sizeof(BVHNode), cudaMemcpyHostToDevice));
     }
     
     CUDA_CHECK(cudaMemcpy(d_light, &light, sizeof(Light), cudaMemcpyHostToDevice));
@@ -550,14 +658,14 @@ void render_gui() {
     
     if (ImGui::CollapsingHeader("Light")) {
         ImGui::PushID("light_section");
-        ImGui::SliderFloat3("Position", &light.position.x, -20, 20); // Expanded range for sunlight
+        ImGui::SliderFloat3("Position", &light.position.x, -20, 20);
         ImGui::ColorEdit3("Color", &light.color.x);
-        ImGui::SliderFloat("Intensity", &light.intensity, 0.1f, 20.0f); // Increased max for sunlight
+        ImGui::SliderFloat("Intensity", &light.intensity, 0.1f, 20.0f);
         ImGui::Checkbox("Dragging", &light.dragging);
         if (ImGui::Button("Reset to Sunlight")) {
-            light.position = {5, 10, 5}; // High position for sun-like angle
-            light.color = {1.0f, 0.95f, 0.9f}; // Sunlight color
-            light.intensity = 10.0f; // High intensity
+            light.position = {5, 10, 5};
+            light.color = {1.0f, 0.95f, 0.9f};
+            light.intensity = 10.0f;
         }
         ImGui::PopID();
     }
@@ -695,26 +803,12 @@ void initialize_gpu() {
 }
 
 void cleanup_gpu() {
-    if (d_triangles) {
-        cudaFree(d_triangles);
-        d_triangles = nullptr;
-    }
-    if (d_light) {
-        cudaFree(d_light);
-        d_light = nullptr;
-    }
-    if (d_floor_plane) {
-        cudaFree(d_floor_plane);
-        d_floor_plane = nullptr;
-    }
-    if (d_pixel_buffer) {
-        cudaFree(d_pixel_buffer);
-        d_pixel_buffer = nullptr;
-    }
-    if (d_selected_mesh) {
-        cudaFree(d_selected_mesh);
-        d_selected_mesh = nullptr;
-    }
+    if (d_triangles) cudaFree(d_triangles);
+    if (d_bvh_nodes) cudaFree(d_bvh_nodes);
+    if (d_light) cudaFree(d_light);
+    if (d_floor_plane) cudaFree(d_floor_plane);
+    if (d_pixel_buffer) cudaFree(d_pixel_buffer);
+    if (d_selected_mesh) cudaFree(d_selected_mesh);
 }
 
 void render_scene(SDL_Renderer* renderer, SDL_Texture*& texture) {
@@ -738,7 +832,7 @@ void render_scene(SDL_Renderer* renderer, SDL_Texture*& texture) {
     dim3 blockSize(16, 16);
     dim3 gridSize((RENDER_WIDTH + blockSize.x - 1) / blockSize.x, (RENDER_HEIGHT + blockSize.y - 1) / blockSize.y);
     
-    render_kernel<<<gridSize, blockSize>>>(d_pixel_buffer, d_triangles, num_triangles, light, floor_plane, 
+    render_kernel<<<gridSize, blockSize>>>(d_pixel_buffer, d_triangles, num_triangles, d_bvh_nodes, light, floor_plane, 
                                      cam_pos, cam_yaw, cam_pitch, FOV, RENDER_WIDTH, RENDER_HEIGHT, selected_mesh);
 
     CUDA_CHECK(cudaGetLastError());
